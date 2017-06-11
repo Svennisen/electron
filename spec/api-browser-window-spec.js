@@ -12,6 +12,7 @@ const {ipcRenderer, remote, screen} = require('electron')
 const {app, ipcMain, BrowserWindow, protocol, webContents} = remote
 
 const isCI = remote.getGlobal('isCi')
+const nativeModulesEnabled = remote.getGlobal('nativeModulesEnabled')
 
 describe('BrowserWindow module', function () {
   var fixtures = path.resolve(__dirname, 'fixtures')
@@ -295,11 +296,6 @@ describe('BrowserWindow module', function () {
       })
       const data = new Buffer(2 * 1024 * 1024).toString('base64')
       w.loadURL(`data:image/png;base64,${data}`)
-    })
-
-    it('should not crash when there is a pending navigation entry', function (done) {
-      ipcRenderer.once('navigated-with-pending-entry', () => done())
-      ipcRenderer.send('navigate-with-pending-entry', w.id)
     })
 
     describe('POST navigations', function () {
@@ -854,7 +850,7 @@ describe('BrowserWindow module', function () {
     })
   })
 
-  describe('"web-preferences" option', function () {
+  describe('"webPreferences" option', function () {
     afterEach(function () {
       ipcMain.removeAllListeners('answer')
     })
@@ -1285,19 +1281,35 @@ describe('BrowserWindow module', function () {
         w.loadURL('file://' + path.join(fixtures, 'api', 'native-window-open-file.html'))
       })
 
-      if (process.platform !== 'win32' || process.execPath.toLowerCase().indexOf('\\out\\d\\') === -1) {
-        it('loads native addons correctly after reload', (done) => {
+      it('blocks accessing cross-origin frames', (done) => {
+        ipcMain.once('answer', (event, content) => {
+          assert.equal(content, 'Blocked a frame with origin "file://" from accessing a cross-origin frame.')
+          done()
+        })
+        w.loadURL('file://' + path.join(fixtures, 'api', 'native-window-open-cross-origin.html'))
+      })
+
+      it('opens window from <iframe> tags', (done) => {
+        ipcMain.once('answer', (event, content) => {
+          assert.equal(content, 'Hello')
+          done()
+        })
+        w.loadURL('file://' + path.join(fixtures, 'api', 'native-window-open-iframe.html'))
+      })
+
+      it('loads native addons correctly after reload', (done) => {
+        if (!nativeModulesEnabled) return done()
+
+        ipcMain.once('answer', (event, content) => {
+          assert.equal(content, 'function')
           ipcMain.once('answer', (event, content) => {
             assert.equal(content, 'function')
-            ipcMain.once('answer', (event, content) => {
-              assert.equal(content, 'function')
-              done()
-            })
-            w.reload()
+            done()
           })
-          w.loadURL('file://' + path.join(fixtures, 'api', 'native-window-open-native-addon.html'))
+          w.reload()
         })
-      }
+        w.loadURL('file://' + path.join(fixtures, 'api', 'native-window-open-native-addon.html'))
+      })
     })
   })
 
@@ -1397,6 +1409,164 @@ describe('BrowserWindow module', function () {
         w.loadURL('about:blank')
       })
       w.loadURL('file://' + path.join(fixtures, 'api', 'beforeunload-false-prevent3.html'))
+    })
+  })
+
+  describe('document.visibilityState/hidden', function () {
+    beforeEach(function () {
+      w.destroy()
+    })
+
+    function onVisibilityChange (callback) {
+      ipcMain.on('pong', function (event, visibilityState, hidden) {
+        if (event.sender.id === w.webContents.id) {
+          callback(visibilityState, hidden)
+        }
+      })
+    }
+
+    function onNextVisibilityChange (callback) {
+      ipcMain.once('pong', function (event, visibilityState, hidden) {
+        if (event.sender.id === w.webContents.id) {
+          callback(visibilityState, hidden)
+        }
+      })
+    }
+
+    afterEach(function () {
+      ipcMain.removeAllListeners('pong')
+    })
+
+    it('visibilityState is initially visible despite window being hidden', function (done) {
+      w = new BrowserWindow({ show: false, width: 100, height: 100 })
+
+      let readyToShow = false
+      w.once('ready-to-show', function () {
+        readyToShow = true
+      })
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        assert.equal(readyToShow, false)
+        assert.equal(visibilityState, 'visible')
+        assert.equal(hidden, false)
+
+        done()
+      })
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
+    })
+
+    it('visibilityState changes when window is hidden', function (done) {
+      w = new BrowserWindow({width: 100, height: 100})
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        assert.equal(visibilityState, 'visible')
+        assert.equal(hidden, false)
+
+        onNextVisibilityChange(function (visibilityState, hidden) {
+          assert.equal(visibilityState, 'hidden')
+          assert.equal(hidden, true)
+
+          done()
+        })
+
+        w.hide()
+      })
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
+    })
+
+    it('visibilityState changes when window is shown', function (done) {
+      w = new BrowserWindow({width: 100, height: 100})
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        onVisibilityChange(function (visibilityState, hidden) {
+          if (!hidden) {
+            assert.equal(visibilityState, 'visible')
+            done()
+          }
+        })
+
+        w.hide()
+        w.show()
+      })
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
+    })
+
+    it('visibilityState changes when window is shown inactive', function (done) {
+      if (isCI && process.platform === 'win32') return done()
+
+      w = new BrowserWindow({width: 100, height: 100})
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        onVisibilityChange(function (visibilityState, hidden) {
+          if (!hidden) {
+            assert.equal(visibilityState, 'visible')
+            done()
+          }
+        })
+
+        w.hide()
+        w.showInactive()
+      })
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
+    })
+
+    it('visibilityState changes when window is minimized', function (done) {
+      if (isCI && process.platform === 'linux') return done()
+
+      w = new BrowserWindow({width: 100, height: 100})
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        assert.equal(visibilityState, 'visible')
+        assert.equal(hidden, false)
+
+        onNextVisibilityChange(function (visibilityState, hidden) {
+          assert.equal(visibilityState, 'hidden')
+          assert.equal(hidden, true)
+
+          done()
+        })
+
+        w.minimize()
+      })
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
+    })
+
+    it('visibilityState remains visible if backgroundThrottling is disabled', function (done) {
+      w = new BrowserWindow({
+        show: false,
+        width: 100,
+        height: 100,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      })
+
+      onNextVisibilityChange(function (visibilityState, hidden) {
+        assert.equal(visibilityState, 'visible')
+        assert.equal(hidden, false)
+
+        onNextVisibilityChange(function (visibilityState, hidden) {
+          done(new Error(`Unexpected visibility change event. visibilityState: ${visibilityState} hidden: ${hidden}`))
+        })
+      })
+
+      w.once('show', () => {
+        w.once('hide', () => {
+          w.once('show', () => {
+            done()
+          })
+          w.show()
+        })
+        w.hide()
+      })
+      w.show()
+
+      w.loadURL('file://' + path.join(fixtures, 'pages', 'visibilitychange.html'))
     })
   })
 
@@ -2306,9 +2476,7 @@ describe('BrowserWindow module', function () {
         typeofArrayPush: 'number',
         typeofFunctionApply: 'boolean',
         typeofPreloadExecuteJavaScriptProperty: 'number',
-        typeofOpenedWindow: 'object',
-        documentHidden: true,
-        documentVisibilityState: 'hidden'
+        typeofOpenedWindow: 'object'
       }
     }
 

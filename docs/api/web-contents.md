@@ -923,7 +923,7 @@ when the JS promise is rejected.
 
 Get the system printer list.
 
-Returns [PrinterInfo[]](structures/printer-info.md)
+Returns [`PrinterInfo[]`](structures/printer-info.md)
 
 #### `contents.print([options])`
 
@@ -931,7 +931,7 @@ Returns [PrinterInfo[]](structures/printer-info.md)
   * `silent` Boolean - Don't ask user for print settings. Default is `false`.
   * `printBackground` Boolean - Also prints the background color and image of
     the web page. Default is `false`.
-  * `deviceName` String - Set the printer device name to use. Default is `''`.
+  * `deviceName` String (optional) - Set the printer device name to use. Default is `''`.
 
 Prints window's web page. When `silent` is set to `true`, Electron will pick
 the system's default printer if `deviceName` is empty and the default settings
@@ -1135,6 +1135,8 @@ Disable device emulation enabled by `webContents.enableDeviceEmulation`.
     `numLock`, `left`, `right`.
 
 Sends an input `event` to the page.
+**Note:** The `BrowserWindow` containing the contents needs to be focused for
+`sendInputEvent()` to work.
 
 For keyboard events, the `event` object also have following properties:
 

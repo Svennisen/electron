@@ -89,6 +89,8 @@ if (global.isCi) {
   })
 }
 
+global.nativeModulesEnabled = process.platform !== 'win32' || process.execPath.toLowerCase().indexOf('\\out\\d\\') === -1
+
 // Register app as standard scheme.
 global.standardScheme = 'app'
 global.zoomScheme = 'zoom'
@@ -324,24 +326,6 @@ ipcMain.on('handle-unhandled-rejection', (event, message) => {
   })
   fs.readFile(__filename, () => {
     Promise.reject(new Error(message))
-  })
-})
-
-ipcMain.on('navigate-with-pending-entry', (event, id) => {
-  const w = BrowserWindow.fromId(id)
-
-  w.webContents.on('did-start-loading', () => {
-    w.loadURL('about:blank')
-  })
-
-  w.webContents.on('did-navigate', (e, url) => {
-    if (url === 'about:blank') {
-      event.sender.send('navigated-with-pending-entry')
-    }
-  })
-
-  w.webContents.session.clearHostResolverCache(() => {
-    w.loadURL('http://host')
   })
 })
 

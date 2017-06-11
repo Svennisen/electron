@@ -147,6 +147,12 @@ bool AtomBrowserClient::RendererUsesNativeWindowOpen(int process_id) {
   return it != process_preferences_.end() && it->second.native_window_open;
 }
 
+bool AtomBrowserClient::RendererDisablesPopups(int process_id) {
+  base::AutoLock auto_lock(process_preferences_lock_);
+  auto it = process_preferences_.find(process_id);
+  return it != process_preferences_.end() && it->second.disable_popups;
+}
+
 void AtomBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
   int process_id = host->GetID();
@@ -160,6 +166,8 @@ void AtomBrowserClient::RenderProcessWillLaunch(
   process_prefs.sandbox = WebContentsPreferences::IsSandboxed(web_contents);
   process_prefs.native_window_open
       = WebContentsPreferences::UsesNativeWindowOpen(web_contents);
+  process_prefs.disable_popups
+      = WebContentsPreferences::DisablePopups(web_contents);
   AddProcessPreferences(host->GetID(), process_prefs);
   // ensure the ProcessPreferences is removed later
   host->AddObserver(this);
@@ -341,10 +349,20 @@ bool AtomBrowserClient::CanCreateWindow(
     bool* no_javascript_access) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  if (IsRendererSandboxed(opener_render_process_id)
-      || RendererUsesNativeWindowOpen(opener_render_process_id)) {
+  if (IsRendererSandboxed(opener_render_process_id)) {
     *no_javascript_access = false;
     return true;
+  }
+
+  if (RendererUsesNativeWindowOpen(opener_render_process_id)) {
+    if (RendererDisablesPopups(opener_render_process_id)) {
+      // <webview> without allowpopups attribute should return
+      // null from window.open calls
+      return false;
+    } else {
+      *no_javascript_access = false;
+      return true;
+    }
   }
 
   if (delegate_) {
@@ -408,6 +426,26 @@ void AtomBrowserClient::RenderProcessHostDestroyed(
     }
   }
   RemoveProcessPreferences(process_id);
+}
+
+void AtomBrowserClient::RenderProcessReady(content::RenderProcessHost* host) {
+  render_process_host_pids_[host->GetID()] = base::GetProcId(host->GetHandle());
+  if (delegate_) {
+    static_cast<api::App*>(delegate_)->RenderProcessReady(host);
+  }
+}
+
+void AtomBrowserClient::RenderProcessExited(content::RenderProcessHost* host,
+                                            base::TerminationStatus status,
+                                            int exit_code) {
+  auto host_pid = render_process_host_pids_.find(host->GetID());
+  if (host_pid != render_process_host_pids_.end()) {
+    if (delegate_) {
+      static_cast<api::App*>(delegate_)->RenderProcessDisconnected(
+          host_pid->second);
+    }
+    render_process_host_pids_.erase(host_pid);
+  }
 }
 
 }  // namespace atom
