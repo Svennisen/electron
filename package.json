@@ -29,8 +29,8 @@
     "bootstrap": "python ./script/bootstrap.py",
     "browserify": "browserify",
     "bump-version": "./script/bump-version.py",
-    "build": "python ./script/build.py -c D",
-    "build-release": "python ./script/build.py",
+    "build": "python ./script/build.py",
+    "create-dist": "python ./script/create-dist.py",
     "clean": "python ./script/clean.py",
     "clean-build": "python ./script/clean.py --build",
     "coverage": "npm run instrument-code-coverage && npm test -- --use-instrumented-asar",
@@ -51,4 +51,3 @@
     "test": "python ./script/test.py"
   }
 }
-
